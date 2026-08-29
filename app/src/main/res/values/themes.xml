@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NotifyLogger" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/brand_on_primary</item>
+        <item name="colorPrimaryContainer">@color/brand_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/brand_on_primary_container</item>
+        <item name="colorSecondary">@color/brand_secondary</item>
+        <item name="colorErrorContainer">@color/brand_error_container</item>
+        <item name="colorOnErrorContainer">@color/brand_on_error_container</item>
+        <!-- edge-to-edge 下状态栏颜色由系统根据背景自动处理，无需手动指定 -->
+    </style>
+</resources>
