@@ -23,6 +23,7 @@ object PushConfig {
     private const val KEY_LLM_URL = "llm_url"
     private const val KEY_LLM_KEY = "llm_key"
     private const val KEY_LLM_MODEL = "llm_model"
+    private const val KEY_LISTENER_HEARTBEAT = "listener_heartbeat"
 
     const val FILTER_ALL = "all"
     const val FILTER_BLACKLIST = "blacklist"
@@ -94,6 +95,16 @@ object PushConfig {
             .putString(KEY_LLM_KEY, key.trim())
             .putString(KEY_LLM_MODEL, model.trim())
             .apply()
+    }
+
+    // ---------- 监听服务心跳（v2.0.4） ----------
+
+    /** 监听服务最近一次心跳时间，用于检测服务是否存活/被系统挂起 */
+    fun listenerHeartbeat(ctx: Context): Long = prefs(ctx).getLong(KEY_LISTENER_HEARTBEAT, 0L)
+
+    /** 监听服务每次心跳时调用（服务内 60s 定时刷新） */
+    fun touchListenerHeartbeat(ctx: Context) {
+        prefs(ctx).edit().putLong(KEY_LISTENER_HEARTBEAT, System.currentTimeMillis()).apply()
     }
 }
 

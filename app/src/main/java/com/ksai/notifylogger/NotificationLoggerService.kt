@@ -2,6 +2,8 @@ package com.ksai.notifylogger
 
 import android.app.Notification
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -32,15 +34,33 @@ class NotificationLoggerService : NotificationListenerService() {
 
     private var db: NotifyDb? = null
 
+    // v2.0.4: 60s 心跳，App 据此判断服务是否存活；服务被系统挂起时心跳停止
+    private val heartbeatHandler = Handler(Looper.getMainLooper())
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            PushConfig.touchListenerHeartbeat(applicationContext)
+            heartbeatHandler.postDelayed(this, 60_000)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         db = NotifyDb(applicationContext)
         Log.i(TAG, "NotificationLoggerService started (v2 all-capture)")
     }
 
+    override fun onDestroy() {
+        heartbeatHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.i(TAG, "Listener connected, backfilling active notifications…")
+        // v2.0.4: 记录心跳 + 启动定时心跳
+        PushConfig.touchListenerHeartbeat(applicationContext)
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        heartbeatHandler.postDelayed(heartbeatRunnable, 60_000)
         // 服务重启/重连后，正在显示的通知不会触发 onNotificationPosted，手动补抓一次
         try {
             val active = activeNotifications

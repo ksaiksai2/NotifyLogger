@@ -1,5 +1,6 @@
 package com.ksai.notifylogger
 
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Intent
 import android.app.AlertDialog
@@ -8,8 +9,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
@@ -118,8 +121,36 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshAll() {
         checkPermission()
+        // v2.0.4: 打开 App 时若监听服务心跳过期（被系统杀掉/挂起），主动请求系统重绑
+        autoRebindIfStale()
         loadStats()
         loadMore(reset = true)
+    }
+
+    /** v2.0.4: 监听服务心跳过期自动请求重绑；返回是否发起了重绑 */
+    private fun autoRebindIfStale(): Boolean {
+        if (!isListenerEnabled()) return false
+        val hb = PushConfig.listenerHeartbeat(this)
+        val stale = hb == 0L || System.currentTimeMillis() - hb > 3 * 60_000L
+        if (stale) {
+            requestListenerRebind(silent = true)
+            return true
+        }
+        return false
+    }
+
+    /** v2.0.4: 请求系统重新绑定通知监听服务（系统被杀后靠这个恢复） */
+    private fun requestListenerRebind(silent: Boolean = false) {
+        try {
+            NotificationListenerService.requestRebind(
+                ComponentName(this, NotificationLoggerService::class.java)
+            )
+            if (!silent) {
+                Toast.makeText(this, "已请求系统重新绑定监听服务", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            LogToast("重连请求失败：${e.message}")
+        }
     }
 
     private fun isListenerEnabled(): Boolean {
@@ -131,7 +162,32 @@ class MainActivity : AppCompatActivity() {
         val enabled = isListenerEnabled()
         permissionCard.visibility = if (enabled) View.GONE else View.VISIBLE
         statusDot.visibility = if (enabled) View.VISIBLE else View.GONE
-        statusText.text = if (enabled) "监听运行中 · 全量记录所有通知" else "通知监听未开启"
+        if (!enabled) {
+            statusText.text = "通知监听未开启"
+            statusText.setOnClickListener(null)
+            return
+        }
+        // v2.0.4: 用心跳判断服务是否真的活着，而不是只看授权开关
+        val hb = PushConfig.listenerHeartbeat(this)
+        val stale = hb == 0L || System.currentTimeMillis() - hb > 3 * 60_000L
+        val pm = getSystemService(PowerManager::class.java)
+        val battRestricted = pm?.isIgnoringBatteryOptimizations(packageName) == false
+        statusText.text = when {
+            stale && battRestricted -> "监听可能被系统杀掉 · 点击重连（并建议关闭省电优化）"
+            stale -> "监听可能被系统杀掉 · 点击重新连接"
+            battRestricted -> "监听运行中 · 建议关闭省电优化保活"
+            else -> "监听运行中 · 全量记录所有通知"
+        }
+        statusText.setOnClickListener {
+            requestListenerRebind()
+            if (battRestricted) {
+                Toast.makeText(
+                    this,
+                    "若仍收不到通知：设置→应用→NotifyLogger→省电策略→不限制",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     private fun loadStats() {
