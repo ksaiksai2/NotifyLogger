@@ -19,10 +19,19 @@ object PushConfig {
     private const val KEY_TOKEN = "token"
     private const val KEY_FILTER_MODE = "filter_mode"
     private const val KEY_FILTER_APPS = "filter_apps"
+    private const val KEY_LLM_MODE = "llm_mode"
+    private const val KEY_LLM_URL = "llm_url"
+    private const val KEY_LLM_KEY = "llm_key"
+    private const val KEY_LLM_MODEL = "llm_model"
 
     const val FILTER_ALL = "all"
     const val FILTER_BLACKLIST = "blacklist"
     const val FILTER_WHITELIST = "whitelist"
+
+    /** AI 分析模式：直调云端 LLM / 走 OpenClaw 网关 */
+    const val LLM_MODE_DIRECT = "direct"
+    const val LLM_MODE_OPENCLAW = "openclaw"
+    const val DEFAULT_LLM_MODEL = "deepseek-chat"
 
     /** 默认推送地址留空，用户在设置页填写（发布版不含个人服务器地址） */
     const val DEFAULT_URL = ""
@@ -60,6 +69,31 @@ object PushConfig {
         FILTER_BLACKLIST -> packageName !in filterApps(ctx)
         FILTER_WHITELIST -> packageName in filterApps(ctx)
         else -> true
+    }
+
+    // ---------- AI 分析直调配置（v2.0.3 新增） ----------
+
+    fun llmMode(ctx: Context): String =
+        prefs(ctx).getString(KEY_LLM_MODE, LLM_MODE_OPENCLAW) ?: LLM_MODE_OPENCLAW
+
+    /** OpenAI 兼容 chat/completions 完整端点，例如 https://api.deepseek.com/v1/chat/completions */
+    fun llmUrl(ctx: Context): String = prefs(ctx).getString(KEY_LLM_URL, "") ?: ""
+
+    fun llmKey(ctx: Context): String = prefs(ctx).getString(KEY_LLM_KEY, "") ?: ""
+
+    fun llmModel(ctx: Context): String =
+        prefs(ctx).getString(KEY_LLM_MODEL, DEFAULT_LLM_MODEL) ?: DEFAULT_LLM_MODEL
+
+    fun isLlmDirectConfigured(ctx: Context): Boolean =
+        llmUrl(ctx).isNotBlank() && llmKey(ctx).isNotBlank() && llmModel(ctx).isNotBlank()
+
+    fun saveLlm(ctx: Context, mode: String, url: String, key: String, model: String) {
+        prefs(ctx).edit()
+            .putString(KEY_LLM_MODE, mode)
+            .putString(KEY_LLM_URL, url.trim())
+            .putString(KEY_LLM_KEY, key.trim())
+            .putString(KEY_LLM_MODEL, model.trim())
+            .apply()
     }
 }
 
