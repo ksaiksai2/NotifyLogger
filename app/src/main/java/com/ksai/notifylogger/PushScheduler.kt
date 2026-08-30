@@ -3,7 +3,9 @@ package com.ksai.notifylogger
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -15,29 +17,56 @@ object PushConfig {
     private const val PREFS = "push_config"
     private const val KEY_URL = "url"
     private const val KEY_TOKEN = "token"
+    private const val KEY_FILTER_MODE = "filter_mode"
+    private const val KEY_FILTER_APPS = "filter_apps"
+
+    const val FILTER_ALL = "all"
+    const val FILTER_BLACKLIST = "blacklist"
+    const val FILTER_WHITELIST = "whitelist"
 
     /** 默认推送地址留空，用户在设置页填写（发布版不含个人服务器地址） */
     const val DEFAULT_URL = ""
 
-    fun url(ctx: Context): String =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, DEFAULT_URL) ?: DEFAULT_URL
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun token(ctx: Context): String =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_TOKEN, "") ?: ""
+    fun url(ctx: Context): String = prefs(ctx).getString(KEY_URL, DEFAULT_URL) ?: DEFAULT_URL
+
+    fun token(ctx: Context): String = prefs(ctx).getString(KEY_TOKEN, "") ?: ""
 
     fun isConfigured(ctx: Context): Boolean = url(ctx).isNotBlank() && token(ctx).isNotBlank()
 
     fun save(ctx: Context, url: String, token: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        prefs(ctx).edit()
             .putString(KEY_URL, url.trim())
             .putString(KEY_TOKEN, token.trim())
             .apply()
+    }
+
+    // ---------- 通知过滤（v2.0.1 新增） ----------
+
+    fun filterMode(ctx: Context): String = prefs(ctx).getString(KEY_FILTER_MODE, FILTER_ALL) ?: FILTER_ALL
+
+    fun filterApps(ctx: Context): Set<String> = prefs(ctx).getStringSet(KEY_FILTER_APPS, emptySet()) ?: emptySet()
+
+    fun saveFilter(ctx: Context, mode: String, apps: Set<String>) {
+        prefs(ctx).edit()
+            .putString(KEY_FILTER_MODE, mode)
+            .putStringSet(KEY_FILTER_APPS, apps)
+            .apply()
+    }
+
+    /** 通知监听服务调用：这条通知是否允许入库 */
+    fun isAllowed(ctx: Context, packageName: String): Boolean = when (filterMode(ctx)) {
+        FILTER_BLACKLIST -> packageName !in filterApps(ctx)
+        FILTER_WHITELIST -> packageName in filterApps(ctx)
+        else -> true
     }
 }
 
 /** 每日 23:00 定时推送调度 */
 object PushScheduler {
     private const val WORK_NAME = "daily_notify_push"
+    const val TEST_WORK_NAME = "notify_test_send"
 
     fun scheduleDailyPush(context: Context) {
         val now = System.currentTimeMillis()
@@ -65,13 +94,16 @@ object PushScheduler {
         )
     }
 
-    /** 立即发送（设置页测试用） */
-    fun sendNow(context: Context) {
+    /** 立即发送（设置页测试用）；用 unique work 便于 UI 观察结果，返回 request 供调用方匹配任务 ID */
+    fun sendNow(context: Context): OneTimeWorkRequest {
         val request = OneTimeWorkRequestBuilder<NotificationPushWorker>()
             .setConstraints(
                 Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
             )
             .build()
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            TEST_WORK_NAME, ExistingWorkPolicy.REPLACE, request
+        )
+        return request
     }
 }

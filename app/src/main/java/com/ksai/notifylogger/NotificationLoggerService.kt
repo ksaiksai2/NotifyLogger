@@ -63,6 +63,12 @@ class NotificationLoggerService : NotificationListenerService() {
     }
 
     private fun capture(sbn: StatusBarNotification, forceRefresh: Boolean) {
+        val pkg = sbn.packageName
+        // v2.0.1: 按用户过滤配置决定是否记录（全部/仅所选/排除所选）
+        if (!PushConfig.isAllowed(applicationContext, pkg)) {
+            Log.d(TAG, "过滤掉 $pkg 的通知")
+            return
+        }
         val notification = sbn.notification ?: run {
             Log.w(TAG, "Notification is null for ${sbn.packageName}")
             return

@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 11+ 查询全部已装应用（通知过滤列表用）；个人工具应用可接受 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:allowBackup="true"

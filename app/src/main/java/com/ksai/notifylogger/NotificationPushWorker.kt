@@ -3,6 +3,7 @@ package com.ksai.notifylogger
 import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,13 +24,15 @@ class NotificationPushWorker(context: Context, params: WorkerParameters) : Corou
 
     companion object {
         private const val TAG = "NotifyPush"
+        const val KEY_RESULT_MSG = "result_msg"
     }
 
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         if (!PushConfig.isConfigured(ctx)) {
+            val msg = "未配置推送地址/token，请先到设置页填写"
             Log.w(TAG, "推送未配置（缺地址或 token），跳过")
-            return Result.failure()
+            return Result.failure(Data.Builder().putString(KEY_RESULT_MSG, msg).build())
         }
 
         val db = NotifyDb(ctx)
@@ -44,7 +47,9 @@ class NotificationPushWorker(context: Context, params: WorkerParameters) : Corou
 
         if (records.isEmpty()) {
             Log.i(TAG, "今日无记录，跳过推送")
-            return Result.success()
+            return Result.success(
+                Data.Builder().putString(KEY_RESULT_MSG, "今日暂无通知记录，未发送").build()
+            )
         }
 
         val json = buildNotifyJson(records)
@@ -68,7 +73,7 @@ class NotificationPushWorker(context: Context, params: WorkerParameters) : Corou
                 JSONArray().put(JSONObject().put("role", "user").put("content", content))
             )
 
-        val result = withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             try {
                 val conn = URL(PushConfig.url(ctx)).openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
@@ -89,12 +94,23 @@ class NotificationPushWorker(context: Context, params: WorkerParameters) : Corou
                 Log.i(TAG, "推送响应 HTTP $code: ${resp.take(300)}")
 
                 conn.disconnect()
-                if (code in 200..299) Result.success() else Result.retry()
+                val msg = if (code in 200..299) {
+                    "✅ 发送成功 (HTTP $code)"
+                } else {
+                    "❌ HTTP $code：${resp.take(120)}"
+                }
+                if (code in 200..299) {
+                    Result.success(Data.Builder().putString(KEY_RESULT_MSG, msg).build())
+                } else {
+                    // 不用 retry：测试场景要立即反馈，retry 会一直处于 ENQUEUED 不触发 finished
+                    Result.failure(Data.Builder().putString(KEY_RESULT_MSG, msg).build())
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "推送失败", e)
-                Result.retry()
+                Result.failure(
+                    Data.Builder().putString(KEY_RESULT_MSG, "❌ 请求异常：${e.message ?: e.javaClass.simpleName}").build()
+                )
             }
         }
-        return result
     }
 }

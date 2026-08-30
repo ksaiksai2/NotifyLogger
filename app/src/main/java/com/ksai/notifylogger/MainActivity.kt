@@ -14,11 +14,18 @@ import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.lifecycle.Observer
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -153,6 +160,7 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<View>(R.id.optJson).setOnClickListener { dialog.dismiss(); exportJson() }
         view.findViewById<View>(R.id.optShare).setOnClickListener { dialog.dismiss(); shareRecords() }
         view.findViewById<View>(R.id.optPush).setOnClickListener { dialog.dismiss(); showPushSettings() }
+        view.findViewById<View>(R.id.optFilter).setOnClickListener { dialog.dismiss(); showFilterSettings() }
         dialog.setContentView(view)
         dialog.show()
     }
@@ -191,10 +199,132 @@ class MainActivity : AppCompatActivity() {
             .setNeutralButton("立即发送测试") { _, _ ->
                 PushConfig.save(this, urlInput.text.toString(), tokenInput.text.toString())
                 PushScheduler.scheduleDailyPush(this)
-                Toast.makeText(this, "已触发发送，结果见系统日志", Toast.LENGTH_LONG).show()
+                val req = PushScheduler.sendNow(this)
+                observeTestSendResult(req.id)
+                Toast.makeText(this, "已触发发送，结果稍后弹出", Toast.LENGTH_LONG).show()
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /**
+     * 通知过滤设置（v2.0.1）
+     * 模式：全部记录 / 仅记录所选 / 排除所选；勾选应用列表
+     */
+    private fun showFilterSettings() {
+        val apps = loadLauncherApps()
+        val currentMode = PushConfig.filterMode(this)
+        val selected = PushConfig.filterApps(this).toMutableSet()
+
+        val dp = resources.displayMetrics.density
+        val padding = (16 * dp).toInt()
+
+        // 模式单选
+        val rbAll = RadioButton(this).apply { text = "记录全部通知" }
+        val rbWhitelist = RadioButton(this).apply { text = "仅记录所选应用" }
+        val rbBlacklist = RadioButton(this).apply { text = "排除所选应用" }
+        when (currentMode) {
+            PushConfig.FILTER_WHITELIST -> rbWhitelist.isChecked = true
+            PushConfig.FILTER_BLACKLIST -> rbBlacklist.isChecked = true
+            else -> rbAll.isChecked = true
+        }
+        val modeGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            addView(rbAll)
+            addView(rbWhitelist)
+            addView(rbBlacklist)
+        }
+
+        // 应用列表（滚动 + 复选）
+        val checkBoxes = mutableMapOf<String, CheckBox>()
+        val listLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        apps.forEach { (pkg, label) ->
+            val cb = CheckBox(this).apply {
+                text = label
+                isChecked = pkg in selected
+            }
+            checkBoxes[pkg] = cb
+            listLayout.addView(cb)
+        }
+        val scroll = ScrollView(this).apply {
+            addView(listLayout)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (320 * dp).toInt()
+            )
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, 0)
+            addView(modeGroup)
+            addView(scroll, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (320 * dp).toInt()
+            ).apply { topMargin = (12 * dp).toInt() })
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("通知过滤")
+            .setMessage("过滤后这些应用的通知不会入库，也不参与推送。")
+            .setView(container)
+            .setPositiveButton("保存") { _, _ ->
+                val mode = when {
+                    rbWhitelist.isChecked -> PushConfig.FILTER_WHITELIST
+                    rbBlacklist.isChecked -> PushConfig.FILTER_BLACKLIST
+                    else -> PushConfig.FILTER_ALL
+                }
+                val chosen = checkBoxes.filterValues { it.isChecked }.keys.toSet()
+                PushConfig.saveFilter(this, mode, chosen)
+                val summary = when (mode) {
+                    PushConfig.FILTER_ALL -> "记录全部"
+                    PushConfig.FILTER_WHITELIST -> "仅记录 ${chosen.size} 个应用"
+                    else -> "排除 ${chosen.size} 个应用"
+                }
+                Toast.makeText(this, "过滤已保存：$summary", Toast.LENGTH_SHORT).show()
+                refreshAll()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 已安装的可启动应用（包名 → 应用名），用于过滤设置 */
+    private fun loadLauncherApps(): List<Pair<String, String>> {
+        return try {
+            val pm = packageManager
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            pm.queryIntentActivities(intent, 0)
+                .mapNotNull { info ->
+                    val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                    val label = try {
+                        info.loadLabel(pm).toString()
+                    } catch (_: Exception) {
+                        pkg
+                    }
+                    pkg to label
+                }
+                .distinctBy { it.first }
+                .sortedBy { it.second }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 观察「立即发送测试」的任务结果并 Toast 展示（v2.0.1）；只匹配本次 requestId */
+    private fun observeTestSendResult(requestId: java.util.UUID) {
+        val wm = WorkManager.getInstance(this)
+        val liveData = wm.getWorkInfosForUniqueWorkLiveData(PushScheduler.TEST_WORK_NAME)
+        lateinit var observer: Observer<List<WorkInfo>>
+        observer = Observer { infos ->
+            val info = infos.firstOrNull { it.id == requestId } ?: return@Observer
+            if (info.state.isFinished) {
+                val msg = info.outputData.getString(NotificationPushWorker.KEY_RESULT_MSG)
+                    ?: "任务完成（无详细信息）"
+                Toast.makeText(this@MainActivity, "发送结果：$msg", Toast.LENGTH_LONG).show()
+                liveData.removeObserver(observer)
+            }
+        }
+        liveData.observe(this, observer)
     }
 
     private fun exportCsv() {
