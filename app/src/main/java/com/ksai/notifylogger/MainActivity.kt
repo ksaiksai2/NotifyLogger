@@ -208,8 +208,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 通知过滤设置（v2.0.1）
+     * 通知过滤设置（v2.0.2 修复交互）
      * 模式：全部记录 / 仅记录所选 / 排除所选；勾选应用列表
+     * 修复：RadioButton 必须设唯一 id（RadioGroup 靠 id 管理选中，NO_ID 会导致切不回其他模式）；
+     *       选「记录全部」时应用列表禁用灰化。
      */
     private fun showFilterSettings() {
         val apps = loadLauncherApps()
@@ -219,20 +221,26 @@ class MainActivity : AppCompatActivity() {
         val dp = resources.displayMetrics.density
         val padding = (16 * dp).toInt()
 
-        // 模式单选
-        val rbAll = RadioButton(this).apply { text = "记录全部通知" }
-        val rbWhitelist = RadioButton(this).apply { text = "仅记录所选应用" }
-        val rbBlacklist = RadioButton(this).apply { text = "排除所选应用" }
-        when (currentMode) {
-            PushConfig.FILTER_WHITELIST -> rbWhitelist.isChecked = true
-            PushConfig.FILTER_BLACKLIST -> rbBlacklist.isChecked = true
-            else -> rbAll.isChecked = true
-        }
+        // 模式单选（RadioButton 必须设唯一 id，否则 RadioGroup 选中逻辑失效）
+        val idAll = View.generateViewId()
+        val idWhitelist = View.generateViewId()
+        val idBlacklist = View.generateViewId()
+        val rbAll = RadioButton(this).apply { id = idAll; text = "记录全部通知" }
+        val rbWhitelist = RadioButton(this).apply { id = idWhitelist; text = "仅记录所选应用" }
+        val rbBlacklist = RadioButton(this).apply { id = idBlacklist; text = "排除所选应用" }
+
         val modeGroup = RadioGroup(this).apply {
             orientation = RadioGroup.VERTICAL
             addView(rbAll)
             addView(rbWhitelist)
             addView(rbBlacklist)
+            check(
+                when (currentMode) {
+                    PushConfig.FILTER_WHITELIST -> idWhitelist
+                    PushConfig.FILTER_BLACKLIST -> idBlacklist
+                    else -> idAll
+                }
+            )
         }
 
         // 应用列表（滚动 + 复选）
@@ -254,6 +262,15 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // 模式联动：选「记录全部」时禁用整个应用列表，勾了白勾的问题消除
+        fun updateListEnabled() {
+            val enabled = modeGroup.checkedRadioButtonId != idAll
+            checkBoxes.values.forEach { it.isEnabled = enabled }
+            scroll.isEnabled = enabled
+        }
+        modeGroup.setOnCheckedChangeListener { _, _ -> updateListEnabled() }
+        updateListEnabled()
+
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, padding, padding, 0)
@@ -269,9 +286,9 @@ class MainActivity : AppCompatActivity() {
             .setMessage("过滤后这些应用的通知不会入库，也不参与推送。")
             .setView(container)
             .setPositiveButton("保存") { _, _ ->
-                val mode = when {
-                    rbWhitelist.isChecked -> PushConfig.FILTER_WHITELIST
-                    rbBlacklist.isChecked -> PushConfig.FILTER_BLACKLIST
+                val mode = when (modeGroup.checkedRadioButtonId) {
+                    idWhitelist -> PushConfig.FILTER_WHITELIST
+                    idBlacklist -> PushConfig.FILTER_BLACKLIST
                     else -> PushConfig.FILTER_ALL
                 }
                 val chosen = checkBoxes.filterValues { it.isChecked }.keys.toSet()
