@@ -71,6 +71,7 @@ class MainActivity : AppCompatActivity() {
 
         db = NotifyDb(this)
         AppLog.i(this, "MainActivity onCreate")
+        startKeepAlive()
 
         // Android 15+ 强制 edge-to-edge：手动处理系统栏 insets，避免内容被状态栏/导航栏遮挡
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets ->
@@ -118,6 +119,24 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshAll()
+    }
+
+    /** v2.0.7: 启动前台保活服务 + 申请通知权限（Android 13+） */
+    private fun startKeepAlive() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+            val keep = Intent(this, KeepAliveService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(keep)
+            } else {
+                startService(keep)
+            }
+            AppLog.i(this, "启动前台保活服务 KeepAliveService")
+        } catch (e: Exception) {
+            AppLog.e(this, "启动保活服务失败: ${e.message}")
+        }
     }
 
     private fun refreshAll() {
