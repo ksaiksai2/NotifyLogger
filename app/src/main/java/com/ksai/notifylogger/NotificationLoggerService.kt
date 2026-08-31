@@ -75,6 +75,8 @@ class NotificationLoggerService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
+        // v2.0.5: 真正收到通知 = 监听活着，立即刷新心跳，避免 ColorOS 冻结住主线程定时器导致误报「被系统杀掉」
+        PushConfig.touchListenerHeartbeat(applicationContext)
         capture(sbn, forceRefresh = false)
     }
 

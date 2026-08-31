@@ -121,6 +121,15 @@ class NotifyDb(context: Context) : SQLiteOpenHelper(context, "notify.db", null, 
         return list
     }
 
+    /** 最近一条记录的 timestamp（无记录返回 0），用作监听存活的副证 */
+    fun lastTimestamp(): Long {
+        val cursor = readableDatabase.rawQuery("SELECT MAX(timestamp) FROM notifications", null)
+        cursor.use {
+            if (it.moveToFirst() && !it.isNull(0)) return it.getLong(0)
+        }
+        return 0L
+    }
+
     fun countTotal(): Int = countWhere(null, null)
 
     fun countSince(startTime: Long): Int = countWhere("timestamp >= ?", arrayOf(startTime.toString()))

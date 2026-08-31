@@ -167,14 +167,18 @@ class MainActivity : AppCompatActivity() {
             statusText.setOnClickListener(null)
             return
         }
-        // v2.0.4: 用心跳判断服务是否真的活着，而不是只看授权开关
+        // v2.0.5: 心跳新鲜 或 最近确实采到通知（ColorOS 冻结会停心跳但不杀监听），都算活着
+        val now = System.currentTimeMillis()
         val hb = PushConfig.listenerHeartbeat(this)
-        val stale = hb == 0L || System.currentTimeMillis() - hb > 3 * 60_000L
+        val lastNotify = try { db.lastTimestamp() } catch (_: Exception) { 0L }
+        val heartbeatFresh = hb > 0 && now - hb <= 3 * 60_000L
+        val capturesRecent = lastNotify > 0 && now - lastNotify <= 10 * 60_000L
+        val alive = heartbeatFresh || capturesRecent
         val pm = getSystemService(PowerManager::class.java)
         val battRestricted = pm?.isIgnoringBatteryOptimizations(packageName) == false
         statusText.text = when {
-            stale && battRestricted -> "监听可能被系统杀掉 · 点击重连（并建议关闭省电优化）"
-            stale -> "监听可能被系统杀掉 · 点击重新连接"
+            !alive && battRestricted -> "监听可能被系统杀掉 · 点击重连（并建议关闭省电优化）"
+            !alive -> "监听可能被系统杀掉 · 点击重新连接"
             battRestricted -> "监听运行中 · 建议关闭省电优化保活"
             else -> "监听运行中 · 全量记录所有通知"
         }
