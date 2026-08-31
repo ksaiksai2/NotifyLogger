@@ -70,6 +70,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         db = NotifyDb(this)
+        AppLog.i(this, "MainActivity onCreate")
 
         // Android 15+ 强制 edge-to-edge：手动处理系统栏 insets，避免内容被状态栏/导航栏遮挡
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { v, insets ->
@@ -120,6 +121,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshAll() {
+        AppLog.i(this, "MainActivity refreshAll / onResume")
         checkPermission()
         // v2.0.4: 打开 App 时若监听服务心跳过期（被系统杀掉/挂起），主动请求系统重绑
         autoRebindIfStale()
@@ -141,6 +143,7 @@ class MainActivity : AppCompatActivity() {
 
     /** v2.0.4: 请求系统重新绑定通知监听服务（系统被杀后靠这个恢复） */
     private fun requestListenerRebind(silent: Boolean = false) {
+        AppLog.i(this, "请求重新绑定监听服务 (silent=$silent)")
         try {
             NotificationListenerService.requestRebind(
                 ComponentName(this, NotificationLoggerService::class.java)
@@ -176,6 +179,7 @@ class MainActivity : AppCompatActivity() {
         val alive = heartbeatFresh || capturesRecent
         val pm = getSystemService(PowerManager::class.java)
         val battRestricted = pm?.isIgnoringBatteryOptimizations(packageName) == false
+        AppLog.i(this, "监听检查: hbAgeSec=${(now - hb) / 1000} lastNotifyAgeSec=${if (lastNotify > 0) (now - lastNotify) / 1000 else -1L} alive=$alive battRestricted=$battRestricted")
         statusText.text = when {
             !alive && battRestricted -> "监听可能被系统杀掉 · 点击重连（并建议关闭省电优化）"
             !alive -> "监听可能被系统杀掉 · 点击重新连接"
@@ -225,6 +229,7 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<View>(R.id.optCsv).setOnClickListener { dialog.dismiss(); exportCsv() }
         view.findViewById<View>(R.id.optJson).setOnClickListener { dialog.dismiss(); exportJson() }
         view.findViewById<View>(R.id.optShare).setOnClickListener { dialog.dismiss(); shareRecords() }
+        view.findViewById<View>(R.id.optLog).setOnClickListener { dialog.dismiss(); exportLog() }
         view.findViewById<View>(R.id.optPush).setOnClickListener { dialog.dismiss(); showPushSettings() }
         view.findViewById<View>(R.id.optAi).setOnClickListener { dialog.dismiss(); showAiSettings() }
         view.findViewById<View>(R.id.optFilter).setOnClickListener { dialog.dismiss(); showFilterSettings() }
@@ -695,6 +700,40 @@ class MainActivity : AppCompatActivity() {
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, text)
         }, "分享通知记录"))
+    }
+
+    /** v2.0.6: 导出运行日志（含诊断快照），供发回排查监听状态 */
+    private fun exportLog() {
+        val now = System.currentTimeMillis()
+        val hb = PushConfig.listenerHeartbeat(this)
+        val lastNotify = try { db.lastTimestamp() } catch (_: Exception) { 0L }
+        val pm = getSystemService(PowerManager::class.java)
+        val enabled = isListenerEnabled()
+        val alive = (hb > 0 && now - hb <= 3 * 60_000L) || (lastNotify > 0 && now - lastNotify <= 10 * 60_000L)
+        val versionName = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "?" }
+
+        val header = buildString {
+            appendLine("===== NotifyLogger 运行日志 / 诊断快照 =====")
+            appendLine("版本: $versionName")
+            appendLine("监听授权 enabled: $enabled")
+            appendLine("心跳 age: ${if (hb > 0) (now - hb) / 1000 else -1}s")
+            appendLine("最近记录 age: ${if (lastNotify > 0) (now - lastNotify) / 1000 else -1}s")
+            appendLine("存活(心跳新鲜 OR 最近采到通知): $alive")
+            appendLine("省电受限: ${pm?.isIgnoringBatteryOptimizations(packageName) == false}")
+            appendLine("过滤模式: ${PushConfig.filterMode(this@MainActivity)}")
+            appendLine("========================================")
+            appendLine()
+        }
+        val content = header + AppLog.dump(this, 300)
+
+        val name = "notify_log_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA).format(Date())}.txt"
+        writeToDownloads(name, "text/plain", content) { uri ->
+            Toast.makeText(this, "已导出运行日志到 下载/NotifyLogger", Toast.LENGTH_LONG).show()
+        }
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, content)
+        }, "发送运行日志给 KAVIS"))
     }
 
     /** 写入公共 Downloads/NotifyLogger 目录（Android 10+ 走 MediaStore，用户文件管理器直接可见） */

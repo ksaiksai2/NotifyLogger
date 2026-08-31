@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
 import org.json.JSONObject
 
 /**
@@ -46,17 +45,18 @@ class NotificationLoggerService : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         db = NotifyDb(applicationContext)
-        Log.i(TAG, "NotificationLoggerService started (v2 all-capture)")
+        AppLog.i(applicationContext, "NotificationLoggerService onCreate (v2 all-capture)")
     }
 
     override fun onDestroy() {
+        AppLog.d(applicationContext, "NotificationLoggerService onDestroy (服务被销毁/系统回收)")
         heartbeatHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.i(TAG, "Listener connected, backfilling active notifications…")
+        AppLog.i(applicationContext, "Listener connected, backfilling active notifications…")
         // v2.0.4: 记录心跳 + 启动定时心跳
         PushConfig.touchListenerHeartbeat(applicationContext)
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
@@ -66,10 +66,10 @@ class NotificationLoggerService : NotificationListenerService() {
             val active = activeNotifications
             if (active != null) {
                 active.forEach { sbn -> capture(sbn, forceRefresh = true) }
-                Log.i(TAG, "Backfilled ${active.size} active notifications")
+                AppLog.i(applicationContext, "Backfilled ${active.size} active notifications")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Backfill failed", e)
+            AppLog.e(applicationContext, "Backfill failed", e)
         }
     }
 
@@ -88,11 +88,11 @@ class NotificationLoggerService : NotificationListenerService() {
         val pkg = sbn.packageName
         // v2.0.1: 按用户过滤配置决定是否记录（全部/仅所选/排除所选）
         if (!PushConfig.isAllowed(applicationContext, pkg)) {
-            Log.d(TAG, "过滤掉 $pkg 的通知")
+            AppLog.d(applicationContext, "过滤掉 $pkg 的通知")
             return
         }
         val notification = sbn.notification ?: run {
-            Log.w(TAG, "Notification is null for ${sbn.packageName}")
+            AppLog.w(applicationContext, "Notification is null for ${sbn.packageName}")
             return
         }
         try {
@@ -137,10 +137,10 @@ class NotificationLoggerService : NotificationListenerService() {
             }
 
             if (title.isNotBlank() || text.isNotBlank()) {
-                Log.i(TAG, "📩 ${sbn.packageName}: $title | $effectiveText")
+                AppLog.i(applicationContext, "📩 ${sbn.packageName}: $title | $effectiveText")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error capturing notification from ${sbn.packageName}", e)
+            AppLog.e(applicationContext, "Error capturing notification from ${sbn.packageName}", e)
         }
     }
 
